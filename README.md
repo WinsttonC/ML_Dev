@@ -20,3 +20,5 @@ uvicorn main:app --reload
 streamlit run app.py
 ```
 Готово!
+
+*Для предсказания можно использовать небольшую подвыборку из данных `train_data.csv`*
