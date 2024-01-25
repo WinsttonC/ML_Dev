@@ -1,12 +1,10 @@
+import time
+import asyncio
+import aiohttp
 import streamlit as st
 import requests
 import pandas as pd
 from models_description import description
-# from streamlit_local_storage import LocalStorage
-
-# def LocalStorageManager():
-#     return LocalStorage()
-# localS = LocalStorageManager()
 
 # ===============================================================
 # СТРАНИЦЫ
@@ -17,6 +15,18 @@ from models_description import description
 # 5 - Выбор модели
 # 6 - Предсказание
 # ===============================================================
+
+st.title("FastAPI + Streamlit Integration")
+if 'step' not in st.session_state:
+    st.session_state.step = 1
+if 'model' not in st.session_state:
+    st.session_state.model = None
+if 'username' not in st.session_state:
+    st.session_state.username = None
+if 'money' not in st.session_state:
+    st.session_state.money = None
+if 'job_id' not in st.session_state:
+    st.session_state.job_id = None
 
 def authenticate(username, password):
     response = requests.post(
@@ -32,15 +42,26 @@ def register(username, password):
     )
     return response
 
-st.title("FastAPI + Streamlit Integration")
-if 'step' not in st.session_state:
-    st.session_state.step = 1
-if 'model' not in st.session_state:
-    st.session_state.model = None
-if 'username' not in st.session_state:
-    st.session_state.username = None
-if 'money' not in st.session_state:
-    st.session_state.money = None
+async def check_job(job_id):
+    async with aiohttp.ClientSession() as session:
+        url = f"http://127.0.0.1:8000/get_prediction"
+        data = {'token': token, 'job_id': job_id, 'model_name': st.session_state.model}
+
+        async with session.post(url, json=data, headers={'Content-Type': 'application/json'}) as response:
+            data = await response.json()
+            if 'В процессе' in data['result']:
+                return 'not finished yet'
+            else:
+                st.toast(data)
+                return 'finished'
+ 
+async def start_checking():
+    while True:
+        status = await check_job(st.session_state.job_id)
+        if status == 'finished':
+            break
+        else:
+            await asyncio.sleep(10)
 
 # Авторизация
 def login():
@@ -197,6 +218,9 @@ elif st.session_state.step == 6:
     if st.button("Изменить выбор модели"):
         st.session_state.step = 5
         st.rerun() 
+    if st.button("Личный кабинет"):
+        st.session_state.step = 3
+        st.rerun() 
 
     data2 = st.file_uploader("Загрузите файл в формате .csv", type=['csv'])
     # def fill_missing_values(data):
@@ -223,8 +247,33 @@ elif st.session_state.step == 6:
                 headers={'Content-Type': 'application/json'}
             )
             st.success(response.json())
+            st.session_state.job_id = response.json()['job_id']
+        
+
         except Exception as e:
             st.error(e)
-    
+        try:
+            asyncio.run(start_checking())
+        except Exception as e:
+            st.write(e)
 
+     
+
+# def check_job(job_id):
+#     response = requests.get(
+#         f"http://127.0.0.1:8000/get_prediction/{job_id}",
+#         params={'token': token, 'model_name': st.session_state.model_name}
+#     )
+#     if response.status_code == 200:
+#         try:
+#             data = response.json()
+#             st.success(data["prediction"])
+#             st.session_state.step = 3
+#             st.rerun()
+#             return  
+#         except Exception as e:
+#             st.error(f"Error parsing JSON: {e}")
+#     else:
+#         # st.error(f"Error {response.status_code}: {response.text}")
+#         return False
 

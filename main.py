@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from joblib import load
 from jose import jwt, JWTError
 import pandas as pd
+from worker import queue, redis_conn
+from rq.job import Job
 
 SECRET_KEY = "dftg11yhujikog34567jik8"
 ALGORITHM = "HS256"
@@ -22,6 +24,22 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
+class GetPrediction(BaseModel):
+    token:str
+    job_id: str
+    model_name: str
+
+class Prediction(BaseModel):
+    token: str
+    model_name: str
+    file_path: str
+
+available_models = {
+    "LogisticRegression" : 6.0, 
+    "KNeighborsClassifier" : 4.0, 
+    "GradientBoostingClassifier" : 9.0
+}
+
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
     if expires_delta:
@@ -33,9 +51,8 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     return encoded_jwt
 
 app = FastAPI()
-# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-def get_current_user(token: str):#Depends(oauth2_scheme)):
+def get_current_user(token: str):
 
     credentials_exception = HTTPException(
         status_code=401,
@@ -152,16 +169,6 @@ def add_money_to_account(amount: float,
     
     return add_money(amount, current_user, db, db_op)
 
-available_models = {
-    "LogisticRegression" : 6.0, 
-    "KNeighborsClassifier" : 4.0, 
-    "GradientBoostingClassifier" : 9.0
-}
-
-def check_balance(user, db):
-    db_user = get_user(db, user.username)
-
-
 @app.post("/user_info")
 def models_list(token, db: Session = Depends(get_db_users)):
     current_user = get_current_user(token)
@@ -179,10 +186,14 @@ def models_list(token, model_name: str = None,  db: Session = Depends(get_db_use
     else:
         return f"Выбрана модель {model_name}"
 
-class Prediction(BaseModel):
-    token: str
-    model_name: str
-    file_path: str
+def make_prediction(model_path, data_path):
+    model = load(model_path)
+    data = pd.read_csv(data_path)
+    try:
+        prediction = model.predict(data)
+        return prediction
+    except Exception as e:
+        return f"Произошла ошибка: {e}"
 
 @app.post("/prediction")
 def prediction(#token,
@@ -193,35 +204,51 @@ def prediction(#token,
                db_op: Session = Depends(get_db_operations)):
     token = input_data.token
     model_name = input_data.model_name
-    file_path = input_data.file_path
+    data_path = input_data.file_path
+    model_path = f"models/{model_name}.joblib"
+    current_user = get_current_user(token)
+    user = get_user(db, current_user)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    
+    job = queue.enqueue(make_prediction, model_path, data_path)
+    return {'job_id': job.id}
+
+@app.post('/get_prediction')
+def get_prediction(data: GetPrediction,
+                   db: Session = Depends(get_db_users),
+                   db_op: Session = Depends(get_db_operations)):
+    token = data.token
+    job_id = data.job_id
+    model_name = data.model_name
 
     current_user = get_current_user(token)
     user = get_user(db, current_user)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     
-    try:
-        model = load(f"models/{model_name}.joblib")
-        data = pd.read_csv(file_path)
-        prediction = model.predict(data) 
-        prediction = f'Результат предсказания: {str(list(prediction))}'
-        user.money -= available_models[model_name]
-        db.commit()
-        db.refresh(user)
+    job = Job.fetch(job_id, connection=redis_conn)
+    if job.is_finished:
+        if 'ошибка' in job.result:
+            return {'result': str(job.result)}
+        else:
+            user.money -= available_models[model_name]
+            db.commit()
+            db.refresh(user)
 
-        operation_info_1 = {
-            'username': user.username,
-            'message' : f'Со счета списано {available_models[model_name]} кредитов.',
-            'date' : datetime.now()
-        }
-        add_operation(db_op, operation_info_1)
-        operation_info_2 = {
-            'username': user.username,
-            'message' : f'Выполнено предсказание с использованием {model_name}.',
-            'date' : datetime.now()
-        }
-        add_operation(db_op, operation_info_2)
-
-        return prediction
-    except Exception as e:
-        return f'Неудачная попытка выполнения предсказания. Попробуйте еще раз ({e})'
+            operation_info_1 = {
+                'username': user.username,
+                'message' : f'Со счета списано {available_models[model_name]} кредитов.',
+                'date' : datetime.now()
+            }
+            add_operation(db_op, operation_info_1)
+            operation_info_2 = {
+                'username': user.username,
+                'message' : f'Выполнено предсказание с использованием {model_name}.',
+                'date' : datetime.now()
+            }
+            add_operation(db_op, operation_info_2)
+            return {'result': str(job.result)}
+    else:
+        return {'result': 'В процессе'}
