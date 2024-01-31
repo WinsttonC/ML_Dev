@@ -4,7 +4,7 @@ import aiohttp
 import streamlit as st
 import requests
 import pandas as pd
-from models_description import description
+from models.models_description import description
 
 # ===============================================================
 # СТРАНИЦЫ
@@ -223,10 +223,6 @@ elif st.session_state.step == 6:
         st.rerun() 
 
     data2 = st.file_uploader("Загрузите файл в формате .csv", type=['csv'])
-    # def fill_missing_values(data):
-    #     for col in data.keys():
-    #         if data[col] == None:
-    #             data[col] = columns_dict_mean[col]
     
     if data2 is not None:
         try:
@@ -257,23 +253,4 @@ elif st.session_state.step == 6:
         except Exception as e:
             st.write(e)
 
-     
-
-# def check_job(job_id):
-#     response = requests.get(
-#         f"http://127.0.0.1:8000/get_prediction/{job_id}",
-#         params={'token': token, 'model_name': st.session_state.model_name}
-#     )
-#     if response.status_code == 200:
-#         try:
-#             data = response.json()
-#             st.success(data["prediction"])
-#             st.session_state.step = 3
-#             st.rerun()
-#             return  
-#         except Exception as e:
-#             st.error(f"Error parsing JSON: {e}")
-#     else:
-#         # st.error(f"Error {response.status_code}: {response.text}")
-#         return False
 

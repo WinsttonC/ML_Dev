@@ -9,10 +9,11 @@ from pydantic import BaseModel
 from joblib import load
 from jose import jwt, JWTError
 import pandas as pd
-from worker import queue, redis_conn
+from worker.worker import queue, redis_conn
 from rq.job import Job
+import os
 
-SECRET_KEY = "dftg11yhujikog34567jik8"
+SECRET_KEY = os.environ.get('SECRET_KEY')
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
